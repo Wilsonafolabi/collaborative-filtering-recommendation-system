@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Song Recommendations</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    <style>
+        body {
+            font-family: 'Circular', sans-serif;
+            color: #FFFFFF;
+            padding: 20px;
+        }
+
+        .animated-bg {
+            position: fixed; /* Fixes the background image so it doesn't move when scrolling */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url(SL-123119-26540-40.jpg);
+            background-size: cover; /* Ensures the image covers the entire screen */
+            background-repeat: no-repeat;
+            background-position: center center; /* Centers the image */
+            z-index: -1;
+        }
+
+        h1,
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        select {
+            width: 300px;
+            padding: 10px;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #fff;
+            background-color: blue;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: lightblue;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="animated-bg"></div>
+    <h1>Song Recommendations</h1>
+    <form method="post">
+        {% csrf_token %}
+        <label for="song">Choose your favorite song:</label>
+        <select id="song" name="song" style="width: 100%;"></select>
+        <button type="submit">Get Recommendations</button>
+    </form>
+
+    {% if same_artist_songs %}
+    <h2>Songs by the Same Artist</h2>
+    <ul>
+        {% for song in same_artist_songs %}
+        <li>
+            {{ song.track_name }} by {{ song.artist_name }}
+            <button class="start-playback" data-track-id="{{ song.track_id }}">▶️</button>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if same_genre_songs %}
+    <h2>You Might Also Like These</h2>
+    <ul>
+        {% for song in same_genre_songs %}
+        <li>
+            {{ song.track_name }} by {{ song.artist_name }}
+            <button class="start-playback" data-track-id="{{ song.track_id }}">▶️</button>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if knn_recommendations %}
+    <h2>Recommended Songs</h2>
+    <ul>
+        {% for song in knn_recommendations %}
+        <li>
+            {{ song.track_name }} by {{ song.artist_name }}
+            <button class="start-playback" data-track-id="{{ song.track_id }}">▶️</button>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <script>
+        var token = '{{ token }}';
+        var csrftoken = getCookie('csrftoken');
+
+        window.onSpotifyWebPlaybackSDKReady = () => {
+            window.spotifyPlayer = new Spotify.Player({
+                name: 'My Spotify Player',
+                getOAuthToken: cb => { cb(token); },
+                volume: 0.5
+            });
+
+            window.spotifyPlayer.addListener('ready', ({ device_id }) => {
+                console.log('Player is ready with Device ID:', device_id);
+                window.device_id = device_id;
+                getDevices();
+            });
+
+            window.spotifyPlayer.addListener('not_ready', ({ device_id }) => {
+                console.log('Player is not ready with Device ID:', device_id);
+            });
+
+            window.spotifyPlayer.connect().then(success => {
+                if (success) {
+                    console.log('Connected to Spotify successfully.');
+                } else {
+                    console.log('Failed to connect to Spotify.');
+                }
+            }).catch(error => {
+                console.error('Connection error:', error);
+            });
+        };
+
+        function getDevices() {
+            fetch('https://api.spotify.com/v1/me/player/devices', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            }).then(response => response.json())
+                .then(data => {
+                    let activeDevice = data.devices.find(device => device.is_active);
+                    if (activeDevice) {
+                        window.activeDeviceId = activeDevice.id;
+                    }
+                }).catch(error => console.error('Error fetching devices:', error));
+        }
+
+        function playSong(trackId) {
+            const deviceId = window.activeDeviceId;
+            if (!deviceId) return;
+
+            fetch('/play-song/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify({
+                    'device_id': deviceId,
+                    'track_id': trackId
+                })
+            }).then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.log('Failed to start playback:', data.error);
+                    }
+                }).catch(error => console.error('Error:', error));
+        }
+
+        function getCookie(name) {
+            var cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = cookies[i].trim();
+                    if (cookie.startsWith(name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        $(document).ready(function () {
+            $('#song').select2({
+                ajax: {
+                    url: '{% url "song_search" %}',
+                    dataType: 'json',
+                    delay: 250,
+                    headers: {
+                        'X-CSRFToken': csrftoken
+                    },
+                    data: params => ({ q: params.term }),
+                    processResults: data => ({ results: data.results }),
+                    cache: true
+                },
+                placeholder: 'Search for a song',
+                minimumInputLength: 1
+            });
+
+            $(document).on('click', '.start-playback', function () {
+                playSong($(this).data('track-id'));
+            });
+        });
+    </script>
+
+</body>
+
+</html>
+
